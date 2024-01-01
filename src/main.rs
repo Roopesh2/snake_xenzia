@@ -14,6 +14,7 @@ const MAP_TILES: [&str; 5] = [" ", "―", "|", "=", "@"];
 fn main() {
     let mut map: [[u8; WIDTH]; HEIGHT] = [[0; WIDTH]; HEIGHT];
     create_wall(&mut map);
+
     print_map(&mut map);
 }
 
@@ -34,9 +35,9 @@ fn create_wall(map: &mut [[u8; WIDTH]; HEIGHT]) {
         map[HEIGHT - 1][i] = WALL_HORZ;
     }
     for i in 1..HEIGHT - 1 {
-        // top part
+        // left part
         map[i][0] = WALL_VERT;
-        // bottom part
+        // right part
         map[i][WIDTH - 1] = WALL_VERT;
     }
 }
