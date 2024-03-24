@@ -1,20 +1,8 @@
-use std::io::{self, Write};
-use std::process::Command;
-use std::{thread, time::Duration};
+use crossterm::{cursor, terminal, ExecutableCommand, QueueableCommand};
+use std::io::{stdout, Write};
+use std::thread;
+use std::time;
 
-fn clear_screen() -> io::Result<()> {
-    // Clear the console screen on Unix-like systems
-    if cfg!(target_os = "windows") {
-        // Clear the console screen on Windows
-        Command::new("cmd").args(&["/c", "cls"]).status()?;
-    } else {
-        // Clear the console screen on Unix-like systems
-        print!("{}[2J", 27 as char);
-        io::stdout().flush()?;
-    };
-
-    Ok(())
-}
 /**
 * Working:
 * takes a bunch of sprites and flattens them to single matrix
@@ -30,13 +18,13 @@ const HEIGHT: usize = 20;
 const W: isize = WIDTH as isize;
 const H: isize = HEIGHT as isize;
 
-
 type Map2D = [[u8; WIDTH]; HEIGHT];
 type Sprite = Vec<(u8, usize, usize)>;
+type Speed = (isize, isize);
 
 const EMPTY_MAP: Map2D = [[0; WIDTH]; HEIGHT];
 
-const MAP_TILES: [&str; 9] = [" ", "═", "║", "╔", "╗", "╚", "╝", "█", "▒"];
+const MAP_TILES: [char; 9] = [' ', '═', '║', '╔', '╗', '╚', '╝', '█', '▒'];
 const WALL_HZ: u8 = 1;
 const WALL_VT: u8 = 2;
 const WALL_TL: u8 = 3;
@@ -46,29 +34,72 @@ const WALL_BR: u8 = 6;
 const SNAKE_BODY: u8 = 7;
 const SNAKE_HEAD: u8 = 8;
 
-
 fn main() {
     let mut snake: Sprite = Vec::new();
     let mut boundary: Map2D = EMPTY_MAP;
-    let head_dir: (isize, isize) = (0, 1);
+    let head_dir: Speed = (0, 1);
+    let mut dur: u128 = 0;
     for i in 0..5 {
         snake.push((SNAKE_BODY, HEIGHT / 2, WIDTH / 2 - 2 + i));
     }
     snake.push((SNAKE_HEAD, HEIGHT / 2, WIDTH / 2 - 2 + 5));
-    // init game states
+    create_wall(&mut boundary);
+    let mut stdout = stdout();
+
+    stdout.execute(cursor::Hide).unwrap();
     loop {
-        clear_screen().unwrap();
-        create_wall(&mut boundary);
-        let mut snake_map = sprite_to_map(&snake);
-        project(&mut boundary, &mut snake_map);
+        let snake_map = sprite_to_map(&snake);
+        let screen = project(snake_map, boundary);
 
-        update_snake_position(&mut snake, head_dir);
+        save_cursor_position(&mut stdout);
+        stdout.write_all(format!("{}", screen).as_bytes()).unwrap();
 
-        thread::sleep(Duration::from_millis(500));
+        if dur % 20 == 0 {
+            update_snake_position(&mut snake, head_dir);
+        }
+        dur += 1;
+        
+        stdout.queue(cursor::RestorePosition).unwrap();
+        stdout.flush().unwrap();
+        thread::sleep(time::Duration::from_millis(20));
+        stdout.queue(cursor::RestorePosition).unwrap();
+        stdout
+            .queue(terminal::Clear(terminal::ClearType::FromCursorDown))
+            .unwrap();
     }
+    stdout.execute(cursor::Show).unwrap();
 }
 
-fn update_snake_position(snake: &mut Sprite, (dy, dx): (isize, isize)) {
+fn save_cursor_position(stdout: &mut std::io::Stdout) {
+    stdout.queue(cursor::SavePosition).unwrap();
+}
+
+fn map2_dto_string(map: Map2D) -> String {
+    let mut str: String = String::from("");
+    for i in 0..HEIGHT {
+        for j in 0..WIDTH {
+            str.push(MAP_TILES[map[i][j] as usize]);
+        }
+        str.push('\n');
+    }
+    return str;
+}
+
+fn project(snake: Map2D, boundary: Map2D) -> String {
+    let mut screen: Map2D = EMPTY_MAP;
+    for i in 0..HEIGHT {
+        for j in 0..WIDTH {
+            // check if snake collides with bounday
+            if (snake[i][j] > 0) && (boundary[i][j] > 0) {
+            } else {
+                screen[i][j] = boundary[i][j] + snake[i][j];
+            }
+        }
+    }
+    return map2_dto_string(screen);
+}
+
+fn update_snake_position(snake: &mut Sprite, (dy, dx): Speed) {
     let head = snake.pop().unwrap().clone();
     let tail = snake.first().unwrap().clone();
     let mut head_i = head.1 as isize + dx;
@@ -99,30 +130,6 @@ fn sprite_to_map(sprite: &Sprite) -> Map2D {
     return res;
 }
 
-fn project(boundary: &mut Map2D, snake: &mut Map2D) {
-    let mut screen: Map2D = EMPTY_MAP;
-    for i in 0..HEIGHT {
-        for j in 0..WIDTH {
-            // check if snake collides with bounday
-            if (snake[i][j] > 0) && (boundary[i][j] > 0) {
-                print!("collision\n");
-            } else {
-                screen[i][j] = boundary[i][j] + snake[i][j];
-            }
-        }
-    }
-
-    print_map(&mut screen);
-}
-fn print_map(boundary: &mut Map2D) {
-    for i in 0..HEIGHT {
-        for j in 0..WIDTH {
-            print!("{}", MAP_TILES[boundary[i][j] as usize]);
-        }
-        print!("\n");
-    }
-}
-
 fn create_wall(boundary: &mut Map2D) {
     for i in 0..WIDTH {
         // top part
@@ -131,13 +138,13 @@ fn create_wall(boundary: &mut Map2D) {
         boundary[HEIGHT - 1][i] = WALL_HZ;
     }
     for i in 1..HEIGHT - 1 {
-		// left part
+        // left part
         boundary[i][0] = WALL_VT;
         // right part
         boundary[i][WIDTH - 1] = WALL_VT;
     }
-	boundary[HEIGHT - 1][0] = WALL_BL;
-	boundary[HEIGHT - 1][WIDTH - 1] = WALL_BR;
-	boundary[0][0] = WALL_TL;
-	boundary[0][WIDTH - 1] = WALL_TR;
+    boundary[HEIGHT - 1][0] = WALL_BL;
+    boundary[HEIGHT - 1][WIDTH - 1] = WALL_BR;
+    boundary[0][0] = WALL_TL;
+    boundary[0][WIDTH - 1] = WALL_TR;
 }
